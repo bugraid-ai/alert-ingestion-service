@@ -1,0 +1,9 @@
+# Minimal requirements for Alert Ingestion Service - Cost Optimized
+fastapi==0.95.1
+uvicorn[standard]==0.22.0
+pydantic==1.10.7
+httpx==0.25.2
+aioboto3==12.3.0
+boto3==1.34.0
+python-multipart==0.0.6
+# No heavy dependencies - keep it lightweight

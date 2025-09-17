@@ -1,0 +1,50 @@
+{
+  "family": "alert-ingestion-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::528104389666:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::528104389666:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "alert-ingestion",
+      "image": "528104389666.dkr.ecr.ap-southeast-1.amazonaws.com/alert-ingestion:latest",
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp",
+          "name": "http"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {"name": "ENVIRONMENT", "value": "development"},
+        {"name": "AWS_DEFAULT_REGION", "value": "ap-southeast-1"},
+        {"name": "NOISE_REDUCTION_API_URL", "value": "http://noise-reduction.ingestion-pipeline.local:8003"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/alert-ingestion",
+          "awslogs-region": "ap-southeast-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "stopTimeout": 30
+    }
+  ],
+  "tags": [
+    {"key": "Environment", "value": "dev"},
+    {"key": "Service", "value": "alert-ingestion"},
+    {"key": "CostCenter", "value": "development"}
+  ]
+}
