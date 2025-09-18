@@ -1,0 +1,76 @@
+name: "Deploy Alert Ingestion Service"
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+jobs:
+  deploy:
+    # 🔹 Dynamically select environment (GitHub will pull secrets from there)
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials (pulled from selected environment's secrets)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # 3. Log in to Amazon ECR
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 4. Pre-Build Security Scan (Trivy FS mode)
+      - name: Run Trivy FS scan (dependencies)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: 'table'
+          exit-code: '0'
+          vuln-type: 'os,library'
+
+      # 5. Build and push Docker image
+      - name: Build, tag, and push Docker image
+        run: |
+          IMAGE_TAG=${GITHUB_SHA::7}
+          docker build -t ${{ secrets.ECR_REPO }}:$IMAGE_TAG .
+          docker push ${{ secrets.ECR_REPO }}:$IMAGE_TAG
+          echo "IMAGE=${{ secrets.ECR_REPO }}:$IMAGE_TAG" >> $GITHUB_ENV
+
+      # 6. Post-Build Security Scan (Trivy Image mode)
+      - name: Run Trivy Image scan (built image)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: 'table'
+          exit-code: '0'
+          vuln-type: 'os,library'
+
+      # 7. Render ECS task definition
+      - name: Render ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: alert-ingestion
+          image: ${{ env.IMAGE }}
+
+      # 8. Deploy ECS service
+      - name: Deploy ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
