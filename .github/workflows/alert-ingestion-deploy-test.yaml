@@ -28,9 +28,9 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --no-cache-dir -r requirements.txt
-          pip install pytest
+          pip install pytest bump2version
 
-      # 4. Run Unit Tests (functions, not just health check)
+      # 4. Run Unit Tests
       - name: Run Unit Tests
         run: pytest --maxfail=1 --disable-warnings -q
 
@@ -49,29 +49,37 @@ jobs:
           scan-type: fs
           scan-ref: .
           format: 'table'
+          output: trivy-fs-report.txt
           exit-code: '0'
           vuln-type: 'os,library'
 
-      # 7. Build and push Docker image
+      # 7. Bump patch version
+      - name: Bump patch version
+        id: bump_version
+        run: |
+          bump2version patch --allow-dirty
+          VERSION=$(cat VERSION)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      # 8. Build and push Docker image
       - name: Build, tag, and push Docker image
         run: |
-          # TODO: auto-increment version from app.setting in future
-          VERSION="v1.0.0.${GITHUB_RUN_NUMBER}"
-          docker build -t ${{ secrets.ECR_REPO }}:$VERSION .
-          docker push ${{ secrets.ECR_REPO }}:$VERSION
-          echo "IMAGE=${{ secrets.ECR_REPO }}:$VERSION" >> $GITHUB_ENV
+          docker build -t ${{ secrets.ECR_REPO }}:${{ env.VERSION }} .
+          docker push ${{ secrets.ECR_REPO }}:${{ env.VERSION }}
+          echo "IMAGE=${{ secrets.ECR_REPO }}:${{ env.VERSION }}" >> $GITHUB_ENV
 
-      # 8. Post-Build Security Scan (Trivy Image mode)
+      # 9. Post-Build Security Scan (Trivy Image mode)
       - name: Run Trivy Image scan (built image)
         id: trivy-image
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.IMAGE }}
           format: 'table'
+          output: trivy-image-report.txt
           exit-code: '0'
           vuln-type: 'os,library'
 
-      # 9. Render ECS task definition
+      # 10. Render ECS task definition
       - name: Render ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -80,7 +88,7 @@ jobs:
           container-name: alert-ingestion
           image: ${{ env.IMAGE }}
 
-      # 10. Deploy ECS service
+      # 11. Deploy ECS service
       - name: Deploy ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
@@ -89,43 +97,28 @@ jobs:
           cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
 
-      # 11. Post-Deployment Health Check
+      # 12. Post-Deployment Health Check
       - name: Post-Deployment Health Check
         run: |
           curl -f http://${{ secrets.APP_URL }}/health || exit 1
 
-      # 12. Slack Notification (success)
+      # 13. Slack Bot Notification (Success)
       - name: Notify Slack (Success)
         if: success()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": ":white_check_mark: Deployment completed for *${{ github.ref_name }}* branch and health check passed",
-              "attachments": [
-                {
-                  "color": "#36a64f",
-                  "title": "Trivy FS Scan",
-                  "text": "${{ steps.trivy-fs.outputs.results }}"
-                },
-                {
-                  "color": "#36a64f",
-                  "title": "Trivy Image Scan",
-                  "text": "${{ steps.trivy-image.outputs.results }}"
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -F "initial_comment=:white_check_mark: Deployment succeeded for *${{ github.ref_name }}* with version *${{ env.VERSION }}* 
+          🔎 SonarQube Report: ${{ secrets.SONAR_HOST_URL }}" \
+               -F channels=${{ secrets.SLACK_CHANNEL }} \
+               -F file=@trivy-fs-report.txt \
+               -F file=@trivy-image-report.txt \
+               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+               https://slack.com/api/files.upload
 
-      # 13. Slack Notification (failure)
+      # 14. Slack Bot Notification (Failure)
       - name: Notify Slack (Failure)
         if: failure()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": ":x: Deployment failed for *${{ github.ref_name }}* branch. Please check the logs."
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -F "initial_comment=:x: Deployment failed for *${{ github.ref_name }}* branch. Please check logs." \
+               -F channels=${{ secrets.SLACK_CHANNEL }} \
+               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+               https://slack.com/api/chat.postMessage
