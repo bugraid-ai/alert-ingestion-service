@@ -8,27 +8,15 @@ on:
 
 jobs:
   deploy:
-    # 🔹 Dynamically select environment (GitHub will pull secrets from there)
     environment: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
     runs-on: ubuntu-latest
 
     steps:
-      # 0. Pre-Build Slack Notification
-      - name: Notify Slack (Build Starting)
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          payload: |
-            {
-              "text": ":rocket: Deployment started for *${{ github.ref_name }}* branch of *Alert Ingestion Service*"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
       # 1. Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Configure AWS credentials (pulled from selected environment's secrets)
+      # 2. Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -36,30 +24,26 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3. Log in to Amazon ECR
-      - name: Log in to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      # 4. Install dependencies (for testing)
+      # 3. Install dependencies
       - name: Install dependencies
         run: |
           pip install --no-cache-dir -r requirements.txt
           pip install pytest
 
-      # 5. Run Unit Tests (FastAPI health check)
+      # 4. Run Unit Tests (functions, not just health check)
       - name: Run Unit Tests
         run: pytest --maxfail=1 --disable-warnings -q
 
-      # 6. SonarQube Analysis
+      # 5. SonarQube Analysis
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-      # 7. Pre-Build Security Scan (Trivy FS mode)
+      # 6. Pre-Build Security Scan (Trivy FS mode)
       - name: Run Trivy FS scan (dependencies)
+        id: trivy-fs
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
@@ -68,16 +52,18 @@ jobs:
           exit-code: '0'
           vuln-type: 'os,library'
 
-      # 8. Build and push Docker image
+      # 7. Build and push Docker image
       - name: Build, tag, and push Docker image
         run: |
+          # TODO: auto-increment version from app.setting in future
           VERSION="v1.0.0.${GITHUB_RUN_NUMBER}"
           docker build -t ${{ secrets.ECR_REPO }}:$VERSION .
           docker push ${{ secrets.ECR_REPO }}:$VERSION
           echo "IMAGE=${{ secrets.ECR_REPO }}:$VERSION" >> $GITHUB_ENV
 
-      # 9. Post-Build Security Scan (Trivy Image mode)
+      # 8. Post-Build Security Scan (Trivy Image mode)
       - name: Run Trivy Image scan (built image)
+        id: trivy-image
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.IMAGE }}
@@ -85,7 +71,7 @@ jobs:
           exit-code: '0'
           vuln-type: 'os,library'
 
-      # 10. Render ECS task definition
+      # 9. Render ECS task definition
       - name: Render ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -94,7 +80,7 @@ jobs:
           container-name: alert-ingestion
           image: ${{ env.IMAGE }}
 
-      # 11. Deploy ECS service
+      # 10. Deploy ECS service
       - name: Deploy ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
@@ -103,13 +89,43 @@ jobs:
           cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
 
-      # 12. Post-Deployment Slack Notification
-      - name: Notify Slack (Build Complete)
+      # 11. Post-Deployment Health Check
+      - name: Post-Deployment Health Check
+        run: |
+          curl -f http://${{ secrets.APP_URL }}/health || exit 1
+
+      # 12. Slack Notification (success)
+      - name: Notify Slack (Success)
+        if: success()
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
             {
-              "text": ":white_check_mark: Deployment completed successfully for *${{ github.ref_name }}* branch of *Alert Ingestion Service*"
+              "text": ":white_check_mark: Deployment completed for *${{ github.ref_name }}* branch and health check passed",
+              "attachments": [
+                {
+                  "color": "#36a64f",
+                  "title": "Trivy FS Scan",
+                  "text": "${{ steps.trivy-fs.outputs.results }}"
+                },
+                {
+                  "color": "#36a64f",
+                  "title": "Trivy Image Scan",
+                  "text": "${{ steps.trivy-image.outputs.results }}"
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      # 13. Slack Notification (failure)
+      - name: Notify Slack (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": ":x: Deployment failed for *${{ github.ref_name }}* branch. Please check the logs."
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
