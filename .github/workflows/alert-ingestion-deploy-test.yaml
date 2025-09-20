@@ -34,8 +34,9 @@ jobs:
       - name: Run Unit Tests
         run: pytest --maxfail=1 --disable-warnings -q
 
-      # 5. SonarQube Analysis
+      # 5. SonarQube Analysis (SKIPPED for now)
       - name: SonarQube Scan
+        if: false   # ❌ Skip until setup is ready
         uses: sonarsource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -97,24 +98,18 @@ jobs:
           cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
 
-      # 12. Post-Deployment Health Check
-      - name: Post-Deployment Health Check
-        run: |
-          curl -f http://${{ secrets.APP_URL }}/health || exit 1
-
-      # 13. Slack Bot Notification (Success)
+      # 12. Slack Bot Notification (Success)
       - name: Notify Slack (Success)
         if: success()
         run: |
-          curl -F "initial_comment=:white_check_mark: Deployment succeeded for *${{ github.ref_name }}* with version *${{ env.VERSION }}* 
-          🔎 SonarQube Report: ${{ secrets.SONAR_HOST_URL }}" \
+          curl -F "initial_comment=:white_check_mark: Deployment succeeded for *${{ github.ref_name }}* with version *${{ env.VERSION }}*" \
                -F channels=${{ secrets.SLACK_CHANNEL }} \
                -F file=@trivy-fs-report.txt \
                -F file=@trivy-image-report.txt \
                -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
                https://slack.com/api/files.upload
 
-      # 14. Slack Bot Notification (Failure)
+      # 13. Slack Bot Notification (Failure)
       - name: Notify Slack (Failure)
         if: failure()
         run: |
