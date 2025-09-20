@@ -4,10 +4,14 @@ on:
   push:
     branches:
       - develop
+  pull_request:
+    types: [closed]
+    branches:
       - main
 
 jobs:
   deploy:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     environment: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
     runs-on: ubuntu-latest
 
@@ -15,6 +19,14 @@ jobs:
       # 1. Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # 1.5. Debug environment info
+      - name: Debug Environment Info
+        run: |
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Environment: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}"
+          echo "ECS Service: ${{ secrets.ECS_SERVICE }}"
+          echo "ECS Cluster: ${{ secrets.ECS_CLUSTER }}"
 
       # 2. Configure AWS credentials
       - name: Configure AWS credentials
@@ -62,14 +74,19 @@ jobs:
           VERSION=$(cat VERSION)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-      # 8. Build and push Docker image
+      # 8. Login to Amazon ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 9. Build and push Docker image
       - name: Build, tag, and push Docker image
         run: |
           docker build -t ${{ secrets.ECR_REPO }}:${{ env.VERSION }} .
           docker push ${{ secrets.ECR_REPO }}:${{ env.VERSION }}
           echo "IMAGE=${{ secrets.ECR_REPO }}:${{ env.VERSION }}" >> $GITHUB_ENV
 
-      # 9. Post-Build Security Scan (Trivy Image mode)
+      # 10. Post-Build Security Scan (Trivy Image mode)
       - name: Run Trivy Image scan (built image)
         id: trivy-image
         uses: aquasecurity/trivy-action@master
@@ -80,7 +97,7 @@ jobs:
           exit-code: '0'
           vuln-type: 'os,library'
 
-      # 10. Render ECS task definition
+      # 11. Render ECS task definition
       - name: Render ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -89,7 +106,7 @@ jobs:
           container-name: alert-ingestion
           image: ${{ env.IMAGE }}
 
-      # 11. Deploy ECS service
+      # 12. Deploy ECS service
       - name: Deploy ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
@@ -97,8 +114,10 @@ jobs:
           service: ${{ secrets.ECS_SERVICE }}
           cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
 
-      # 12. Slack Bot Notification (Success)
+      # 13. Slack Bot Notification (Success)
       - name: Notify Slack (Success)
         if: success()
         run: |
@@ -109,7 +128,7 @@ jobs:
                -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
                https://slack.com/api/files.upload
 
-      # 13. Slack Bot Notification (Failure)
+      # 14. Slack Bot Notification (Failure)
       - name: Notify Slack (Failure)
         if: failure()
         run: |
