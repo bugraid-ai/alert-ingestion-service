@@ -1,0 +1,119 @@
+name: "Deploy Alert Ingestion Service"
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+jobs:
+  deploy:
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+          pip install pytest bump2version
+
+      # 4. Run Unit Tests
+      - name: Run Unit Tests
+        run: pytest --maxfail=1 --disable-warnings -q
+
+      # 5. SonarQube Analysis (SKIPPED for now)
+      - name: SonarQube Scan
+        if: false   # ❌ Skip until setup is ready
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      # 6. Pre-Build Security Scan (Trivy FS mode)
+      - name: Run Trivy FS scan (dependencies)
+        id: trivy-fs
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: 'table'
+          output: trivy-fs-report.txt
+          exit-code: '0'
+          vuln-type: 'os,library'
+
+      # 7. Bump patch version
+      - name: Bump patch version
+        id: bump_version
+        run: |
+          bump2version patch --allow-dirty
+          VERSION=$(cat VERSION)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      # 8. Build and push Docker image
+      - name: Build, tag, and push Docker image
+        run: |
+          docker build -t ${{ secrets.ECR_REPO }}:${{ env.VERSION }} .
+          docker push ${{ secrets.ECR_REPO }}:${{ env.VERSION }}
+          echo "IMAGE=${{ secrets.ECR_REPO }}:${{ env.VERSION }}" >> $GITHUB_ENV
+
+      # 9. Post-Build Security Scan (Trivy Image mode)
+      - name: Run Trivy Image scan (built image)
+        id: trivy-image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: 'table'
+          output: trivy-image-report.txt
+          exit-code: '0'
+          vuln-type: 'os,library'
+
+      # 10. Render ECS task definition
+      - name: Render ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: alert-ingestion
+          image: ${{ env.IMAGE }}
+
+      # 11. Deploy ECS service
+      - name: Deploy ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      # 12. Slack Bot Notification (Success)
+      - name: Notify Slack (Success)
+        if: success()
+        run: |
+          curl -F "initial_comment=:white_check_mark: Deployment succeeded for *${{ github.ref_name }}* with version *${{ env.VERSION }}*" \
+               -F channels=${{ secrets.SLACK_CHANNEL }} \
+               -F file=@trivy-fs-report.txt \
+               -F file=@trivy-image-report.txt \
+               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+               https://slack.com/api/files.upload
+
+      # 13. Slack Bot Notification (Failure)
+      - name: Notify Slack (Failure)
+        if: failure()
+        run: |
+          curl -F "initial_comment=:x: Deployment failed for *${{ github.ref_name }}* branch. Please check logs." \
+               -F channels=${{ secrets.SLACK_CHANNEL }} \
+               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+               https://slack.com/api/chat.postMessage
