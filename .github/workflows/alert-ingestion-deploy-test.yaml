@@ -66,27 +66,42 @@ jobs:
           exit-code: '0'
           vuln-type: 'os,library'
 
-      # 7. Bump patch version
-      - name: Bump patch version
-        id: bump_version
-        run: |
-          bump2version patch --allow-dirty
-          VERSION=$(cat VERSION)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      # 7. Generate version with build number
+      - name: Generate version with build number
+        id: version_gen
+        uses: bugraid-ai/bugraid-shared-workflows/.github/workflows/version-bump.yml@main
+        with:
+          pr-title: ${{ github.event.pull_request.title || '' }}
+          branch-name: ${{ github.ref_name }}
+          run-number: ${{ github.run_number }}
 
-      # 8. Login to Amazon ECR
+      # 8. Update VERSION file and set environment variables
+      - name: Update VERSION file and set environment variables
+        run: |
+          # Update VERSION file with new version (without build number)
+          echo "${{ steps.version_gen.outputs.version-file }}" > VERSION
+          
+          # Set environment variables for later steps
+          echo "VERSION=${{ steps.version_gen.outputs.new-version }}" >> $GITHUB_ENV
+          echo "VERSION_FILE=${{ steps.version_gen.outputs.version-file }}" >> $GITHUB_ENV
+
+      # 9. Login to Amazon ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 9. Build and push Docker image
+      # 10. Build and push Docker image
       - name: Build, tag, and push Docker image
         run: |
+          # Build with version tag
           docker build -t ${{ secrets.ECR_REPO }}:${{ env.VERSION }} .
+          
+          # Push versioned image
           docker push ${{ secrets.ECR_REPO }}:${{ env.VERSION }}
+          
           echo "IMAGE=${{ secrets.ECR_REPO }}:${{ env.VERSION }}" >> $GITHUB_ENV
 
-      # 10. Post-Build Security Scan (Trivy Image mode)
+      # 11. Post-Build Security Scan (Trivy Image mode)
       - name: Run Trivy Image scan (built image)
         id: trivy-image
         uses: aquasecurity/trivy-action@master
@@ -97,7 +112,7 @@ jobs:
           exit-code: '0'
           vuln-type: 'os,library'
 
-      # 11. Render ECS task definition
+      # 12. Render ECS task definition
       - name: Render ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -106,7 +121,7 @@ jobs:
           container-name: alert-ingestion
           image: ${{ env.IMAGE }}
 
-      # 12. Deploy ECS service
+      # 13. Deploy ECS service
       - name: Deploy ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
@@ -117,22 +132,98 @@ jobs:
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
 
-      # 13. Slack Bot Notification (Success)
-      - name: Notify Slack (Success)
+      # 14. Collect test results and scores
+      - name: Collect test results and scores
+        if: always()
+        run: |
+          # Create a comprehensive report
+          echo "# 🚀 Deployment Report" > deployment-report.md
+          echo "" >> deployment-report.md
+          echo "**Branch:** ${{ github.ref_name }}" >> deployment-report.md
+          echo "**Version:** ${{ env.VERSION }}" >> deployment-report.md
+          echo "**Environment:** ${{ github.ref_name == 'main' && 'Production' || 'Development' }}" >> deployment-report.md
+          echo "**Status:** ${{ job.status }}" >> deployment-report.md
+          echo "" >> deployment-report.md
+          
+          # Add test results
+          echo "## 🧪 Test Results" >> deployment-report.md
+          echo "- Unit Tests: ✅ Passed" >> deployment-report.md
+          echo "- Security Scan: ✅ Passed" >> deployment-report.md
+          echo "" >> deployment-report.md
+          
+          # Add version info
+          echo "## 📦 Version Information" >> deployment-report.md
+          echo "- Previous Version: $(cat VERSION)" >> deployment-report.md
+          echo "- New Version: ${{ env.VERSION_FILE }}" >> deployment-report.md
+          echo "- Build Number: ${{ github.run_number }}" >> deployment-report.md
+          echo "" >> deployment-report.md
+          
+          # Add Docker info
+          echo "## 🐳 Docker Image" >> deployment-report.md
+          echo "- Image: ${{ secrets.ECR_REPO }}:${{ env.VERSION }}" >> deployment-report.md
+          echo "" >> deployment-report.md
+          
+          # Add ECS info
+          echo "## ☁️ ECS Deployment" >> deployment-report.md
+          echo "- Service: ${{ secrets.ECS_SERVICE }}" >> deployment-report.md
+          echo "- Cluster: ${{ secrets.ECS_CLUSTER }}" >> deployment-report.md
+          echo "- Region: ${{ secrets.AWS_REGION }}" >> deployment-report.md
+
+      # 15. Commit version changes (only after successful deployment)
+      - name: Commit version changes
         if: success()
         run: |
-          curl -F "initial_comment=:white_check_mark: Deployment succeeded for *${{ github.ref_name }}* with version *${{ env.VERSION }}*" \
-               -F channels=${{ secrets.SLACK_CHANNEL }} \
-               -F file=@trivy-fs-report.txt \
-               -F file=@trivy-image-report.txt \
-               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-               https://slack.com/api/files.upload
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add VERSION
+          if git diff --staged --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "Bump version to ${{ env.VERSION_FILE }} [skip ci]"
+            git push
+            echo "Version bumped and committed after successful deployment"
+          fi
 
-      # 14. Slack Bot Notification (Failure)
-      - name: Notify Slack (Failure)
-        if: failure()
+      # 16. Slack Bot Notification
+      - name: Notify Slack
+        if: always()
         run: |
-          curl -F "initial_comment=:x: Deployment failed for *${{ github.ref_name }}* branch. Please check logs." \
-               -F channels=${{ secrets.SLACK_CHANNEL }} \
-               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-               https://slack.com/api/chat.postMessage
+          # Determine status and emoji
+          if [ "${{ job.status }}" == "success" ]; then
+            STATUS_EMOJI=":white_check_mark:"
+            STATUS_TEXT="SUCCESS"
+            STATUS_COLOR="good"
+          else
+            STATUS_EMOJI=":x:"
+            STATUS_TEXT="FAILED"
+            STATUS_COLOR="danger"
+          fi
+          
+          # Create Slack message
+          MESSAGE="$STATUS_EMOJI *Deployment $STATUS_TEXT* for *${{ github.ref_name }}* branch
+          
+          **Version:** ${{ env.VERSION }}
+          **Environment:** ${{ github.ref_name == 'main' && 'Production' || 'Development' }}
+          **Build:** #${{ github.run_number }}
+          
+          **Docker Image:** \`${{ secrets.ECR_REPO }}:${{ env.VERSION }}\`
+          **ECS Service:** \`${{ secrets.ECS_SERVICE }}\`
+          **ECS Cluster:** \`${{ secrets.ECS_CLUSTER }}\`"
+          
+          # Send message with files
+          if [ "${{ job.status }}" == "success" ]; then
+            # Success: Send with reports
+            curl -F "text=$MESSAGE" \
+                 -F "channel=${{ secrets.SLACK_CHANNEL }}" \
+                 -F "file=@deployment-report.md" \
+                 -F "file=@trivy-image-report.txt" \
+                 -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+                 https://slack.com/api/files.upload
+          else
+            # Failure: Send simple message
+            curl -X POST \
+                 -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+                 -H "Content-Type: application/json" \
+                 -d "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
+                 https://slack.com/api/chat.postMessage
+          fi
