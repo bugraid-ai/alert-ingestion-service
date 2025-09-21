@@ -18,6 +18,7 @@ jobs:
       pr-title: ${{ github.event.pull_request.title || '' }}
       branch-name: ${{ github.ref_name }}
       run-number: ${{ github.run_number }}
+    secrets: inherit
 
   deploy:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
