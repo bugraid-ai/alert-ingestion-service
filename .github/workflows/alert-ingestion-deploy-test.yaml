@@ -13,7 +13,7 @@ jobs:
   # Generate version with build number
   version-bump:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
-    uses: bugraid-ai/bugraid-shared-workflows/.github/workflows/version-bump.yml@v1.0.0
+    uses: ./.github/workflows/version-bump.yml
     with:
       pr-title: ${{ github.event.pull_request.title || '' }}
       branch-name: ${{ github.ref_name }}
