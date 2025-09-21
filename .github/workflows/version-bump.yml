@@ -15,7 +15,7 @@ on:
       run-number:
         description: 'GitHub run number'
         required: true
-        type: number
+        type: string
     outputs:
       new-version:
         description: 'New version with build number'
