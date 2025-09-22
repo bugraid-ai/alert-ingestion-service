@@ -92,6 +92,15 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # 9.5 Debug ECR repo secret
+      - name: Debug ECR repo secret
+        run: |
+          if [ -z "${{ secrets.ECR_REPO }}" ]; then
+            echo "❌ ECR_REPO secret is EMPTY"
+          else
+            echo "✅ ECR_REPO is set (masked): ${{ secrets.ECR_REPO }}"
+          fi
+
       # 10. Build and push Docker image
       - name: Build, tag, and push Docker image
         run: |
