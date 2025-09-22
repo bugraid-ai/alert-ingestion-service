@@ -1,10 +1,8 @@
-# Repo/alert-ingestion-service/tests/test_app.py
-
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import pytest
 from datetime import datetime
-
-# Import service from fastapi_alert_ingestion.py
 from fastapi_alert_ingestion import AlertIngestionService
 
 
@@ -47,4 +45,5 @@ def test_prepare_alert_for_json_serializes_datetime():
     assert "timestamp" in result
     assert isinstance(result["timestamp"], str)  # should be ISO string
     assert result["timestamp"].endswith("Z")
+
 
