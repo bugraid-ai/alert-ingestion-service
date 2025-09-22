@@ -4,8 +4,8 @@
 import pytest
 from datetime import datetime
 
-# Import service from app.py
-from app import AlertIngestionService
+# Import service from fastapi_alert_ingestion.py
+from fastapi_alert_ingestion import AlertIngestionService
 
 
 def test_parse_time_iso_format():
@@ -47,3 +47,4 @@ def test_prepare_alert_for_json_serializes_datetime():
     assert "timestamp" in result
     assert isinstance(result["timestamp"], str)  # should be ISO string
     assert result["timestamp"].endswith("Z")
+
