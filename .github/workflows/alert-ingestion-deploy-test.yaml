@@ -92,17 +92,16 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-           # 10. Build and push Docker image
+      # 10. Build and push Docker image
       - name: Build, tag, and push Docker image
         run: |
           # Build with version tag
-          docker build -t ${{ secrets.ECR_REPO }}:v${{ env.VERSION }} .
+          docker build -t ${{ secrets.ECR_REPO }}:${{ env.VERSION }} .
           
           # Push versioned image
-          docker push ${{ secrets.ECR_REPO }}:v${{ env.VERSION }}
+          docker push ${{ secrets.ECR_REPO }}:${{ env.VERSION }}
           
-          # Save image reference for later steps
-          echo "IMAGE=${{ secrets.ECR_REPO }}:v${{ env.VERSION }}" >> $GITHUB_ENV
+          echo "IMAGE=${{ secrets.ECR_REPO }}:${{ env.VERSION }}" >> $GITHUB_ENV
 
       # 11. Post-Build Security Scan (Trivy Image mode)
       - name: Run Trivy Image scan (built image)
@@ -135,7 +134,7 @@ jobs:
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
 
-            # 14. Collect test results and scores
+      # 14. Collect test results and scores
       - name: Collect test results and scores
         if: always()
         run: |
@@ -143,7 +142,7 @@ jobs:
           echo "# 🚀 Deployment Report" > deployment-report.md
           echo "" >> deployment-report.md
           echo "**Branch:** ${{ github.ref_name }}" >> deployment-report.md
-          echo "**Version:** v${{ env.VERSION }}" >> deployment-report.md
+          echo "**Version:** ${{ env.VERSION }}" >> deployment-report.md
           echo "**Environment:** ${{ github.ref_name == 'main' && 'Production' || 'Development' }}" >> deployment-report.md
           echo "**Status:** ${{ job.status }}" >> deployment-report.md
           echo "" >> deployment-report.md
@@ -157,13 +156,13 @@ jobs:
           # Add version info
           echo "## 📦 Version Information" >> deployment-report.md
           echo "- Previous Version: $(cat VERSION)" >> deployment-report.md
-          echo "- New Version: v${{ needs.version-bump.outputs.version-file }}" >> deployment-report.md
+          echo "- New Version: ${{ needs.version-bump.outputs.version-file }}" >> deployment-report.md
           echo "- Build Number: ${{ github.run_number }}" >> deployment-report.md
           echo "" >> deployment-report.md
           
           # Add Docker info
           echo "## 🐳 Docker Image" >> deployment-report.md
-          echo "- Image: ${{ secrets.ECR_REPO }}:v${{ env.VERSION }}" >> deployment-report.md
+          echo "- Image: ${{ secrets.ECR_REPO }}:${{ env.VERSION }}" >> deployment-report.md
           echo "" >> deployment-report.md
           
           # Add ECS info
@@ -187,7 +186,7 @@ jobs:
             echo "Version bumped and committed after successful deployment"
           fi
 
-            # 16. Slack Bot Notification
+      # 16. Slack Bot Notification
       - name: Notify Slack
         if: always()
         run: |
@@ -205,11 +204,11 @@ jobs:
           # Create Slack message
           MESSAGE="$STATUS_EMOJI *Deployment $STATUS_TEXT* for *${{ github.ref_name }}* branch
           
-          **Version:** v${{ env.VERSION }}
+          **Version:** ${{ env.VERSION }}
           **Environment:** ${{ github.ref_name == 'main' && 'Production' || 'Development' }}
           **Build:** #${{ github.run_number }}
           
-          **Docker Image:** \`${{ secrets.ECR_REPO }}:v${{ env.VERSION }}\`
+          **Docker Image:** \`${{ secrets.ECR_REPO }}:${{ env.VERSION }}\`
           **ECS Service:** \`${{ secrets.ECS_SERVICE }}\`
           **ECS Cluster:** \`${{ secrets.ECS_CLUSTER }}\`"
           
