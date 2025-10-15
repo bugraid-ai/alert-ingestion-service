@@ -28,7 +28,7 @@ on:
 
 jobs:
   version-bump:
-    uses: ./.github/workflows/version-bump.yml
+    uses: ./.github/workflows/version-bump-v2.yml
     with:
       pr-title: ${{ github.event.pull_request.title || '' }}
       branch-name: ${{ github.ref_name }}
