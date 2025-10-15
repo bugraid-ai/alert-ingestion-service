@@ -85,7 +85,8 @@ jobs:
             ECR_REPO=${{ secrets.DEV_ECR_REPO }}
           fi
 
-          IMAGE=$ECR_REPO:${{ env.VERSION }}
+          # ✅ Only change: include service name in image path
+          IMAGE=$ECR_REPO/${{ env.SERVICE }}:${{ env.VERSION }}
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
           echo "🛠 Building Docker image for ${{ env.SERVICE }}"
@@ -113,10 +114,13 @@ jobs:
             STATUS_TEXT="FAILED"
           fi
 
+          # ✅ Only change: show image name with service for display
+          IMAGE_NAME="${{ env.SERVICE }}:${{ env.VERSION }}"
+
           MESSAGE="$STATUS_EMOJI *Build $STATUS_TEXT* for *${{ env.SERVICE }}*  
           Environment: ${{ env.ENVIRONMENT }}  
           Version: ${{ env.VERSION }}  
-          Image: ${{ env.IMAGE }}  
+          Image: $IMAGE_NAME  
           Trigger: ${{ github.event_name }}  
           Branch: ${{ github.ref_name }}"
 
