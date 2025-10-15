@@ -1,3 +1,4 @@
+# Linted workflow for GitHub Actions - triggers workflow_dispatch button
 name: deploy-ecs (AI-ML)
 
 on:
