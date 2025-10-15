@@ -1,5 +1,5 @@
 # Linted workflow for GitHub Actions - triggers workflow_dispatch button
-name: build-and-push (AI-ML)
+name: build-and-push-ai-ml
 
 on:
   workflow_dispatch:
@@ -117,7 +117,9 @@ jobs:
           MESSAGE="$STATUS_EMOJI *Build $STATUS_TEXT* for *${{ env.SERVICE }}*  
           Environment: ${{ env.ENVIRONMENT }}  
           Version: ${{ env.VERSION }}  
-          Image: ${{ env.IMAGE }}"
+          Image: ${{ env.IMAGE }}  
+          Trigger: ${{ github.event_name }}  
+          Branch: ${{ github.ref_name }}"
 
           curl -F "text=$MESSAGE" \
                -F "channel=${{ secrets.SLACK_CHANNEL }}" \
