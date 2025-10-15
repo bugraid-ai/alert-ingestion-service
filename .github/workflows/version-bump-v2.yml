@@ -16,16 +16,14 @@ on:
         description: 'GitHub run number'
         required: true
         type: string
+    outputs:
+      new-version:
+        description: 'New version with build number'
+        value: ${{ jobs.version-bump.outputs.new-version }}
+      version-file:
+        description: 'Version without build number'
+        value: ${{ jobs.version-bump.outputs.version-file }}
     secrets: inherit
-
-# 👇 Outputs must be defined here (root level), not inside "on:"
-outputs:
-  new-version:
-    description: 'New version with build number'
-    value: ${{ jobs.version-bump.outputs.new-version }}
-  version-file:
-    description: 'Version without build number'
-    value: ${{ jobs.version-bump.outputs.version-file }}
 
 jobs:
   version-bump:

@@ -109,9 +109,9 @@ jobs:
           fi
 
           MESSAGE="$STATUS_EMOJI *Build $STATUS_TEXT* for *${{ env.SERVICE }}*  
-Environment: ${{ env.ENVIRONMENT }}  
-Version: ${{ env.VERSION }}  
-Image: ${{ env.IMAGE }}"
+          Environment: ${{ env.ENVIRONMENT }}  
+          Version: ${{ env.VERSION }}  
+          Image: ${{ env.IMAGE }}"
 
           curl -F "text=$MESSAGE" \
                -F "channel=${{ secrets.SLACK_CHANNEL }}" \
