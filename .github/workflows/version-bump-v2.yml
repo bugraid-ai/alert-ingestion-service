@@ -1,8 +1,8 @@
 # DISABLED: Version bump workflow - using manual versioning instead
 name: "version-bump-ai-ml-disabled"
 
-# on:
-#   workflow_call:
+on:
+  workflow_dispatch:
 #     inputs:
 #       pr-title:
 #         description: 'Pull request title'
