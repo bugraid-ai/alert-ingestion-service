@@ -1,4 +1,4 @@
-name: "deploy-ecs (AI-ML)"
+name: deploy-ecs (AI-ML)
 
 on:
   workflow_dispatch:
@@ -112,11 +112,11 @@ jobs:
           fi
 
           MESSAGE="$STATUS_EMOJI *Deploy $STATUS_TEXT* for *${{ env.SERVICE }}*  
-          Environment: ${{ env.ENVIRONMENT }}  
-          Image: ${{ env.IMAGE }}  
-          Image Tag: ${{ env.IMAGE_TAG }}  
-          Cluster: ${{ env.ECS_CLUSTER }}  
-          Service: ${{ env.ECS_SERVICE }}"
+Environment: ${{ env.ENVIRONMENT }}  
+Image: ${{ env.IMAGE }}  
+Image Tag: ${{ env.IMAGE_TAG }}  
+Cluster: ${{ env.ECS_CLUSTER }}  
+Service: ${{ env.ECS_SERVICE }}"
 
           curl -F "text=$MESSAGE" \
                -F "channel=${{ secrets.SLACK_CHANNEL }}" \

@@ -1,4 +1,4 @@
-name: "build-and-push (AI-ML)"
+name: build-and-push (AI-ML)
 
 on:
   workflow_dispatch:
@@ -18,13 +18,6 @@ on:
           - alert-ingestion
           - anomaly-detection-dev
           - context-fetcher
-          - correlation
-          - edal-signal-router-dev
-          - edal-watermark-committer-dev
-          - edal-worker-dev
-          - embedding-bedrock-service-1qi1wekx
-          - fastapi-service
-          - firehose-ingest-dev-service-7tdpx9pw
 
 jobs:
   version-bump:
@@ -59,14 +52,14 @@ jobs:
 
       - name: Run Trivy FS scan
         id: trivy-fs
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.25.1
         with:
           scan-type: fs
           scan-ref: .
-          format: 'table'
+          format: table
           output: trivy-fs-report.txt
-          exit-code: '0'
-          vuln-type: 'os,library'
+          exit-code: 0
+          vuln-type: os,library
 
       - name: Set VERSION from version-bump
         run: |
@@ -95,13 +88,13 @@ jobs:
 
       - name: Run Trivy Image scan
         id: trivy-image
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.25.1
         with:
           image-ref: ${{ env.IMAGE }}
-          format: 'table'
+          format: table
           output: trivy-image-report.txt
-          exit-code: '0'
-          vuln-type: 'os,library'
+          exit-code: 0
+          vuln-type: os,library
 
       - name: Notify Slack
         if: always()
@@ -115,9 +108,9 @@ jobs:
           fi
 
           MESSAGE="$STATUS_EMOJI *Build $STATUS_TEXT* for *${{ env.SERVICE }}*  
-          Environment: ${{ env.ENVIRONMENT }}  
-          Version: ${{ env.VERSION }}  
-          Image: ${{ env.IMAGE }}"
+Environment: ${{ env.ENVIRONMENT }}  
+Version: ${{ env.VERSION }}  
+Image: ${{ env.IMAGE }}"
 
           curl -F "text=$MESSAGE" \
                -F "channel=${{ secrets.SLACK_CHANNEL }}" \
