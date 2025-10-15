@@ -2,6 +2,8 @@ name: "Deploy ECS Service (AI-ML)"
 
 on:
   workflow_dispatch:
+    branches:
+      - develop
     inputs:
       environment:
         description: "Target environment"
