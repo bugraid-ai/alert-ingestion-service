@@ -85,11 +85,10 @@ jobs:
             ECR_REPO=${{ secrets.DEV_ECR_REPO }}
           fi
 
-          SERVICE=${{ env.SERVICE }}
-          IMAGE=$ECR_REPO/$SERVICE:${{ env.VERSION }}
+          IMAGE=$ECR_REPO:${{ env.VERSION }}
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-          echo "🛠 Building Docker image for $SERVICE"
+          echo "🛠 Building Docker image for ${{ env.SERVICE }}"
           docker build -t $IMAGE .
           docker push $IMAGE
 
