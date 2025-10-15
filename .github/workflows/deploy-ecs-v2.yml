@@ -1,4 +1,4 @@
-name: "Deploy ECS Service (AI-ML)"
+name: "deploy-ecs (AI-ML)"
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         options:
-          - develop
+          - dev
           - prd
       service:
         description: "ECS Service to deploy"

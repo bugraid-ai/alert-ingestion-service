@@ -1,4 +1,4 @@
-name: "Build & Push Docker Image (AI-ML)"
+name: "build-and-push (AI-ML)"
 
 on:
   workflow_dispatch:
