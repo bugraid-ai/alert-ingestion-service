@@ -1,4 +1,4 @@
-name: "Version Bump"
+name: "Version Bump (AI-ML)"
 
 on:
   workflow_call:
