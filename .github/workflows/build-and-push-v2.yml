@@ -104,10 +104,25 @@ jobs:
           Trigger: ${{ github.event_name }}  
           Branch: ${{ github.ref_name }}"
 
-          curl -F "text=$MESSAGE" \
-               -F "channel=${{ secrets.SLACK_CHANNEL }}" \
-               -F "file=@trivy-fs-report.txt" \
-               -F "file=@trivy-image-report.txt" \
+          echo "📤 Sending main build message to Slack..."
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H 'Content-type: application/json' \
+            --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
+            https://slack.com/api/chat.postMessage)
+
+          echo "Slack response: $RESPONSE"
+
+          echo "📤 Uploading Trivy FS report..."
+          curl -s -F "file=@trivy-fs-report.txt" \
+               -F "initial_comment=📄 Trivy FS Scan Report for ${{ env.SERVICE }}" \
+               -F "channels=${{ secrets.SLACK_CHANNEL }}" \
                -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
                https://slack.com/api/files.upload
 
+          echo "📤 Uploading Trivy Image report..."
+          curl -s -F "file=@trivy-image-report.txt" \
+               -F "initial_comment=📄 Trivy Image Scan Report for ${{ env.SERVICE }}" \
+               -F "channels=${{ secrets.SLACK_CHANNEL }}" \
+               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+               https://slack.com/api/files.upload
