@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         options:
-          - develop
+          - dev
           - prd
       service:
         description: "ECS Service to build for"
