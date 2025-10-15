@@ -1,32 +1,33 @@
-# Linted workflow for GitHub Actions - triggers workflow_dispatch button
-name: deploy-ecs (AI-ML)
+name: deploy-ecs-ai-ml
 
 on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment"
-        required: true
-        type: choice
-        options:
-          - dev
-          - prd
-      service:
-        description: "ECS Service to deploy"
-        required: true
-        type: choice
-        options:
-          - alert-ingestion
-          - anomaly-detection-dev
-          - context-fetcher
+  workflow_run:
+    workflows: ["build-and-push-ai-ml"]
+    types:
+      - completed
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download build metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: build-metadata
+          path: ./metadata
+
+      - name: Load metadata into environment
+        run: |
+          cat ./metadata/metadata.env
+          export $(cat ./metadata/metadata.env | xargs)
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+          echo "SERVICE=$SERVICE" >> $GITHUB_ENV
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -35,55 +36,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Fetch latest image tag from ECR
-        id: latest-image
+      - name: Determine ECS Cluster
         run: |
-          if [ "${{ github.event.inputs.environment }}" = "prd" ]; then
-            REPO=${{ secrets.PRD_ECR_REPO }}
+          if [ "${{ env.ENVIRONMENT }}" = "prd" ]; then
+            echo "ECS_CLUSTER=${{ secrets.PRD_ECS_CLUSTER }}" >> $GITHUB_ENV
           else
-            REPO=${{ secrets.DEV_ECR_REPO }}
+            echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
           fi
 
-          echo "Fetching latest image tag from ECR: $REPO"
-
-          LATEST_TAG=$(aws ecr describe-images \
-            --repository-name $REPO \
-            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
-            --output text)
-
-          if [ "$LATEST_TAG" = "None" ] || [ -z "$LATEST_TAG" ]; then
-            echo "❌ No images found in $REPO"
-            exit 1
-          fi
-
-          echo "Latest image tag: $LATEST_TAG"
-          echo "IMAGE_TAG=$LATEST_TAG" >> $GITHUB_ENV
-
-      - name: Set ECS Cluster & Service
-        run: |
-          ENV="${{ github.event.inputs.environment }}"
-          SERVICE="${{ github.event.inputs.service }}"
-          IMAGE_TAG="${{ env.IMAGE_TAG }}"
-
-          if [ "$ENV" = "prd" ]; then
-            ECS_CLUSTER=${{ secrets.PRD_ECS_CLUSTER }}
-            ECR_REPO=${{ secrets.PRD_ECR_REPO }}
-          else
-            ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}
-            ECR_REPO=${{ secrets.DEV_ECR_REPO }}
-          fi
-
-          ECS_SERVICE=$SERVICE
-          IMAGE=$ECR_REPO/$SERVICE:$IMAGE_TAG
-
-          echo "ECS_CLUSTER=$ECS_CLUSTER" >> $GITHUB_ENV
-          echo "ECS_SERVICE=$ECS_SERVICE" >> $GITHUB_ENV
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
-          echo "ENVIRONMENT=$ENV" >> $GITHUB_ENV
-          echo "SERVICE=$SERVICE" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-
-      - name: Render ECS task definition
+      - name: Render ECS Task Definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -91,15 +52,13 @@ jobs:
           container-name: ${{ env.SERVICE }}
           image: ${{ env.IMAGE }}
 
-      - name: Deploy ECS service
+      - name: Deploy ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
+          service: ${{ env.SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Notify Slack
         if: always()
@@ -115,11 +74,10 @@ jobs:
           MESSAGE="$STATUS_EMOJI *Deploy $STATUS_TEXT* for *${{ env.SERVICE }}*  
           Environment: ${{ env.ENVIRONMENT }}  
           Image: ${{ env.IMAGE }}  
-          Image Tag: ${{ env.IMAGE_TAG }}  
-          Cluster: ${{ env.ECS_CLUSTER }}  
-          Service: ${{ env.ECS_SERVICE }}"
+          Cluster: ${{ env.ECS_CLUSTER }}"
 
-          curl -F "text=$MESSAGE" \
-               -F "channel=${{ secrets.SLACK_CHANNEL }}" \
-               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-               https://slack.com/api/chat.postMessage
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Content-type: application/json" \
+            --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
+            https://slack.com/api/chat.postMessage

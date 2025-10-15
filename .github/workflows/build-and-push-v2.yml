@@ -23,11 +23,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    outputs:
+      image: ${{ steps.export.outputs.image }}
+      environment: ${{ steps.export.outputs.environment }}
+      service: ${{ steps.export.outputs.service }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set environment and service
+      - name: Set environment variables
         run: |
           echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
           echo "SERVICE=${{ github.event.inputs.service }}" >> $GITHUB_ENV
@@ -52,16 +57,15 @@ jobs:
           exit-code: 0
           vuln-type: os,library
 
-      - name: Set VERSION manually
+      - name: Set VERSION
         run: |
           echo "VERSION=v1.0.0.${{ github.run_number }}" >> $GITHUB_ENV
-          echo "VERSION_FILE=v1.0.0" >> $GITHUB_ENV
           echo "Selected Version: ${{ env.VERSION }}"
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push Docker image
+      - name: Build and push Docker image
         run: |
           if [ "${{ env.ENVIRONMENT }}" = "prd" ]; then
             ECR_REPO=${{ secrets.PRD_ECR_REPO }}
@@ -69,12 +73,14 @@ jobs:
             ECR_REPO=${{ secrets.DEV_ECR_REPO }}
           fi
 
-          IMAGE=$ECR_REPO:${{ env.SERVICE }}-${{ env.VERSION }}
+          IMAGE_TAG=${{ env.SERVICE }}-${{ env.VERSION }}
+          IMAGE="$ECR_REPO:$IMAGE_TAG"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-          echo "🛠 Building Docker image for ${{ env.SERVICE }}"
-          docker build -t $IMAGE .
-          docker push $IMAGE
+          echo "🛠 Building Docker image: $IMAGE"
+          docker build --no-cache -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "✅ Pushed $IMAGE successfully"
 
       - name: Run Trivy Image scan
         id: trivy-image
@@ -85,6 +91,27 @@ jobs:
           output: trivy-image-report.txt
           exit-code: 0
           vuln-type: os,library
+
+      - name: Save build metadata
+        run: |
+          mkdir -p metadata
+          echo "ENVIRONMENT=${{ env.ENVIRONMENT }}" >> metadata/metadata.env
+          echo "SERVICE=${{ env.SERVICE }}" >> metadata/metadata.env
+          echo "IMAGE=${{ env.IMAGE }}" >> metadata/metadata.env
+        shell: bash
+
+      - name: Upload build metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-metadata
+          path: metadata/metadata.env
+
+      - name: Export outputs for downstream workflows
+        id: export
+        run: |
+          echo "image=${{ env.IMAGE }}" >> $GITHUB_OUTPUT
+          echo "environment=${{ env.ENVIRONMENT }}" >> $GITHUB_OUTPUT
+          echo "service=${{ env.SERVICE }}" >> $GITHUB_OUTPUT
 
       - name: Notify Slack
         if: always()
@@ -104,25 +131,8 @@ jobs:
           Trigger: ${{ github.event_name }}  
           Branch: ${{ github.ref_name }}"
 
-          echo "📤 Sending main build message to Slack..."
-          RESPONSE=$(curl -s -X POST \
+          curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-            -H 'Content-type: application/json' \
+            -H "Content-type: application/json" \
             --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
-            https://slack.com/api/chat.postMessage)
-
-          echo "Slack response: $RESPONSE"
-
-          echo "📤 Uploading Trivy FS report..."
-          curl -s -F "file=@trivy-fs-report.txt" \
-               -F "initial_comment=📄 Trivy FS Scan Report for ${{ env.SERVICE }}" \
-               -F "channels=${{ secrets.SLACK_CHANNEL }}" \
-               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-               https://slack.com/api/files.upload
-
-          echo "📤 Uploading Trivy Image report..."
-          curl -s -F "file=@trivy-image-report.txt" \
-               -F "initial_comment=📄 Trivy Image Scan Report for ${{ env.SERVICE }}" \
-               -F "channels=${{ secrets.SLACK_CHANNEL }}" \
-               -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-               https://slack.com/api/files.upload
+            https://slack.com/api/chat.postMessage
