@@ -69,7 +69,7 @@ jobs:
             ECR_REPO=${{ secrets.DEV_ECR_REPO }}
           fi
 
-          IMAGE=$ECR_REPO/${{ env.SERVICE }}:${{ env.VERSION }}
+          IMAGE=$ECR_REPO:${{ env.SERVICE }}-${{ env.VERSION }}
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
           echo "🛠 Building Docker image for ${{ env.SERVICE }}"
@@ -110,3 +110,4 @@ jobs:
                -F "file=@trivy-image-report.txt" \
                -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
                https://slack.com/api/files.upload
+
