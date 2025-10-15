@@ -1,4 +1,3 @@
-# Linted workflow for GitHub Actions - triggers workflow_dispatch button
 name: build-and-push-ai-ml
 
 on:
@@ -21,17 +20,8 @@ on:
           - context-fetcher
 
 jobs:
-  # version-bump:
-  #   uses: ./.github/workflows/version-bump-v2.yml
-  #   with:
-  #     pr-title: ${{ github.event.pull_request.title || '' }}
-  #     branch-name: ${{ github.ref_name }}
-  #     run-number: ${{ github.run_number }}
-  #   secrets: inherit
-
   build:
     runs-on: ubuntu-latest
-    # needs: version-bump
 
     steps:
       - name: Checkout repository
@@ -62,12 +52,6 @@ jobs:
           exit-code: 0
           vuln-type: os,library
 
-      # - name: Set VERSION from version-bump
-      #   run: |
-      #     echo "VERSION=${{ needs.version-bump.outputs.new-version }}" >> $GITHUB_ENV
-      #     echo "VERSION_FILE=${{ needs.version-bump.outputs.version-file }}" >> $GITHUB_ENV
-      #     echo "Selected Version: ${{ env.VERSION }}"
-      
       - name: Set VERSION manually
         run: |
           echo "VERSION=v1.0.0.${{ github.run_number }}" >> $GITHUB_ENV
@@ -85,7 +69,7 @@ jobs:
             ECR_REPO=${{ secrets.DEV_ECR_REPO }}
           fi
 
-          IMAGE=$ECR_REPO:${{ env.VERSION }}
+          IMAGE=$ECR_REPO/${{ env.SERVICE }}:${{ env.VERSION }}
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
           echo "🛠 Building Docker image for ${{ env.SERVICE }}"
