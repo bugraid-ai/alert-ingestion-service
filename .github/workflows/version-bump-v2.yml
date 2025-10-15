@@ -3,7 +3,15 @@ name: "version-bump-ai-ml-disabled"
 
 on:
   workflow_dispatch:
-#     inputs:
+
+jobs:
+  disabled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Workflow Disabled
+        run: |
+          echo "This workflow has been disabled. Using manual versioning instead."
+          echo "Version bump logic has been moved to individual workflows."
 #       pr-title:
 #         description: 'Pull request title'
 #         required: false
