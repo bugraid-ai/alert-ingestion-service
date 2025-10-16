@@ -37,6 +37,12 @@ jobs:
           echo "SERVICE=$SERVICE"
           echo "ENVIRONMENT=$ENVIRONMENT"
 
+          # Fail if missing
+          if [ -z "$IMAGE" ] || [ -z "$SERVICE" ] || [ -z "$ENVIRONMENT" ]; then
+            echo "❌ Missing required outputs from build pipeline!"
+            exit 1
+          fi
+
           # Export to GitHub environment
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
@@ -57,41 +63,39 @@ jobs:
           else
             echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
           fi
-          echo "ECS_CLUSTER set to $ECS_CLUSTER"
+          echo "✅ ECS_CLUSTER set."
 
       - name: Get container name dynamically
         id: get-container
         run: |
           SERVICE_NAME="${{ env.SERVICE }}"
+          echo "Finding matching container for service: $SERVICE_NAME"
+
+          # Find container whose name is a prefix of the service
           CONTAINER_NAME=$(jq -r --arg svc "$SERVICE_NAME" '.containerDefinitions[] | select($svc | startswith(.name)) | .name' task-definition.json)
 
-          if [ -z "$CONTAINER_NAME" ]; then
+          if [ -z "$CONTAINER_NAME" ] || [ "$CONTAINER_NAME" = "null" ]; then
             echo "❌ No matching container found for service: $SERVICE_NAME"
             exit 1
           fi
 
+          echo "✅ Found container: $CONTAINER_NAME"
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          echo "Using container: $CONTAINER_NAME"
 
       - name: Render ECS Task Definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
-        env:
-          IMAGE: ${{ env.IMAGE }}
         with:
           task-definition: task-definition.json
-          container-name: $CONTAINER_NAME
-          image: $IMAGE
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.IMAGE }}
 
       - name: Deploy ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        env:
-          ECS_CLUSTER: ${{ env.ECS_CLUSTER }}
-          SERVICE: ${{ env.SERVICE }}
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: $SERVICE
-          cluster: $ECS_CLUSTER
+          service: ${{ env.SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
 
       - name: Notify Slack
@@ -112,3 +116,4 @@ jobs:
             -H "Content-type: application/json" \
             --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
             https://slack.com/api/chat.postMessage
+
