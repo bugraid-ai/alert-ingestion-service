@@ -59,15 +59,28 @@ jobs:
           fi
           echo "ECS_CLUSTER set to $ECS_CLUSTER"
 
+      - name: Get container name dynamically
+        id: get-container
+        run: |
+          SERVICE_NAME="${{ env.SERVICE }}"
+          CONTAINER_NAME=$(jq -r --arg svc "$SERVICE_NAME" '.containerDefinitions[] | select($svc | startswith(.name)) | .name' task-definition.json)
+
+          if [ -z "$CONTAINER_NAME" ]; then
+            echo "❌ No matching container found for service: $SERVICE_NAME"
+            exit 1
+          fi
+
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          echo "Using container: $CONTAINER_NAME"
+
       - name: Render ECS Task Definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         env:
           IMAGE: ${{ env.IMAGE }}
-          SERVICE: ${{ env.SERVICE }}
         with:
           task-definition: task-definition.json
-          container-name: $SERVICE
+          container-name: $CONTAINER_NAME
           image: $IMAGE
 
       - name: Deploy ECS Service
