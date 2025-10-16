@@ -70,6 +70,7 @@ jobs:
           Environment: ${{ env.ENVIRONMENT }}  
           Image: ${{ env.IMAGE }}  
           Cluster: ${{ env.ECS_CLUSTER }}"
+
           curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
             -H "Content-type: application/json" \
