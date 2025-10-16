@@ -12,24 +12,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install GitHub CLI and jq
+        run: sudo apt update && sudo apt install -y gh jq
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Get Pipeline 1 outputs
         id: get-outputs
         run: |
-          echo "Getting outputs from the completed workflow run..."
-          # Fetch run number of the completed workflow
           RUN_ID=${{ github.event.workflow_run.id }}
 
-          # Call GitHub API to get workflow run outputs
-          OUTPUTS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID | jq -r '.jobs[] | select(.name=="build") | .steps[] | select(.name=="export") | .outputs | @base64')
-          
-          decode() { echo "$1" | base64 --decode; }
-          
-          IMAGE=$(decode $OUTPUTS | jq -r '.image')
-          SERVICE=$(decode $OUTPUTS | jq -r '.service')
-          ENVIRONMENT=$(decode $OUTPUTS | jq -r '.environment')
+          # Get the outputs of the 'build' job from Pipeline 1
+          OUTPUTS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID | jq -r '.jobs[] | select(.name=="build") | .steps[] | select(.name=="export") | .outputs')
+
+          IMAGE=$(echo "$OUTPUTS" | jq -r '.image')
+          SERVICE=$(echo "$OUTPUTS" | jq -r '.service')
+          ENVIRONMENT=$(echo "$OUTPUTS" | jq -r '.environment')
 
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
