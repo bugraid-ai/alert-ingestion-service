@@ -62,17 +62,23 @@ jobs:
       - name: Render ECS Task Definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
+        env:
+          IMAGE: ${{ env.IMAGE }}
+          SERVICE: ${{ env.SERVICE }}
         with:
           task-definition: task-definition.json
-          container-name: ${{ env.SERVICE }}
-          image: ${{ env.IMAGE }}
+          container-name: $SERVICE
+          image: $IMAGE
 
       - name: Deploy ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        env:
+          ECS_CLUSTER: ${{ env.ECS_CLUSTER }}
+          SERVICE: ${{ env.SERVICE }}
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
+          service: $SERVICE
+          cluster: $ECS_CLUSTER
           wait-for-service-stability: true
 
       - name: Notify Slack
