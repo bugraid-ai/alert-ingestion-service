@@ -12,24 +12,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install GitHub CLI and jq
-        run: sudo apt update && sudo apt install -y gh jq
-
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install GitHub CLI and jq
+        run: sudo apt update && sudo apt install -y gh jq
 
       - name: Get Pipeline 1 outputs
         id: get-outputs
         run: |
+          echo "Getting outputs from the completed workflow run..."
           RUN_ID=${{ github.event.workflow_run.id }}
 
-          # Get the outputs of the 'build' job from Pipeline 1
-          OUTPUTS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID | jq -r '.jobs[] | select(.name=="build") | .steps[] | select(.name=="export") | .outputs')
+          # Fetch jobs of the workflow run
+          JOBS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID | jq -r '.jobs[] | select(.name=="build")')
 
-          IMAGE=$(echo "$OUTPUTS" | jq -r '.image')
-          SERVICE=$(echo "$OUTPUTS" | jq -r '.service')
-          ENVIRONMENT=$(echo "$OUTPUTS" | jq -r '.environment')
+          # Extract outputs from the "export" step
+          IMAGE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="export") | .outputs.image')
+          SERVICE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="export") | .outputs.service')
+          ENVIRONMENT=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="export") | .outputs.environment')
 
+          # Debug to confirm values
+          echo "IMAGE=$IMAGE"
+          echo "SERVICE=$SERVICE"
+          echo "ENVIRONMENT=$ENVIRONMENT"
+
+          # Export to GitHub environment
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
@@ -43,10 +51,13 @@ jobs:
 
       - name: Determine ECS Cluster
         run: |
-          if [ "${{ env.ENVIRONMENT }}" = "prd" ]; then
+          echo "ENVIRONMENT=$ENVIRONMENT"
+          if [ "$ENVIRONMENT" = "prd" ]; then
             echo "ECS_CLUSTER=${{ secrets.PRD_ECS_CLUSTER }}" >> $GITHUB_ENV
           else
             echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
+          fi
+          echo "ECS_CLUSTER set to $ECS_CLUSTER"
 
       - name: Render ECS Task Definition
         id: task-def
