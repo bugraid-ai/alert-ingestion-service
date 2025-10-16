@@ -7,22 +7,16 @@ on:
         description: "Target environment"
         required: true
         type: choice
-        options:
-          - dev
-          - prd
+        options: [dev, prd]
       service:
         description: "ECS Service to build for"
         required: true
         type: choice
-        options:
-          - alert-ingestion
-          - anomaly-detection-dev
-          - context-fetcher
+        options: [alert-ingestion, anomaly-detection-dev, context-fetcher]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     outputs:
       image: ${{ steps.export.outputs.image }}
       environment: ${{ steps.export.outputs.environment }}
@@ -32,107 +26,56 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set environment variables
+      - name: Set environment
         run: |
           echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
           echo "SERVICE=${{ github.event.inputs.service }}" >> $GITHUB_ENV
-          echo "Selected Environment: ${{ github.event.inputs.environment }}"
-          echo "Selected Service: ${{ github.event.inputs.service }}"
 
-      - name: Configure AWS credentials
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Run Trivy FS scan
-        id: trivy-fs
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: table
-          output: trivy-fs-report.txt
-          exit-code: 0
-          vuln-type: os,library
+      - name: Set version
+        run: echo "VERSION=v1.0.0.${{ github.run_number }}" >> $GITHUB_ENV
 
-      - name: Set VERSION
-        run: |
-          echo "VERSION=v1.0.0.${{ github.run_number }}" >> $GITHUB_ENV
-          echo "Selected Version: ${{ env.VERSION }}"
-
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push Docker image
+      - name: Build & Push
         run: |
           if [ "${{ env.ENVIRONMENT }}" = "prd" ]; then
             ECR_REPO=${{ secrets.PRD_ECR_REPO }}
           else
             ECR_REPO=${{ secrets.DEV_ECR_REPO }}
           fi
-
           IMAGE_TAG=${{ env.SERVICE }}-${{ env.VERSION }}
           IMAGE="$ECR_REPO:$IMAGE_TAG"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-          echo "🛠 Building Docker image: $IMAGE"
-          docker build --no-cache -t "$IMAGE" .
-          docker push "$IMAGE"
-          echo "✅ Pushed $IMAGE successfully"
-
-      - name: Run Trivy Image scan
-        id: trivy-image
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          image-ref: ${{ env.IMAGE }}
-          format: table
-          output: trivy-image-report.txt
-          exit-code: 0
-          vuln-type: os,library
-
-      - name: Save build metadata
-        run: |
-          mkdir -p metadata
-          echo "ENVIRONMENT=${{ env.ENVIRONMENT }}" >> metadata/metadata.env
-          echo "SERVICE=${{ env.SERVICE }}" >> metadata/metadata.env
-          echo "IMAGE=${{ env.IMAGE }}" >> metadata/metadata.env
-        shell: bash
-
-      - name: Upload build metadata
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-metadata
-          path: metadata/metadata.env
-
-      - name: Export outputs for downstream workflows
-        id: export
+      - id: export
         run: |
           echo "image=${{ env.IMAGE }}" >> $GITHUB_OUTPUT
           echo "environment=${{ env.ENVIRONMENT }}" >> $GITHUB_OUTPUT
           echo "service=${{ env.SERVICE }}" >> $GITHUB_OUTPUT
 
       - name: Notify Slack
-        if: always()
         run: |
-          if [ "${{ job.status }}" == "success" ]; then
-            STATUS_EMOJI=":white_check_mark:"
-            STATUS_TEXT="SUCCESS"
-          else
-            STATUS_EMOJI=":x:"
-            STATUS_TEXT="FAILED"
-          fi
-
-          MESSAGE="$STATUS_EMOJI *Build $STATUS_TEXT* for *${{ env.SERVICE }}*  
-          Environment: ${{ env.ENVIRONMENT }}  
-          Version: ${{ env.VERSION }}  
-          Image: ${{ env.IMAGE }}  
-          Trigger: ${{ github.event_name }}  
-          Branch: ${{ github.ref_name }}"
-
           curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
             -H "Content-type: application/json" \
-            --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
+            --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\":white_check_mark: Build SUCCESS for *${{ env.SERVICE }}* in *${{ env.ENVIRONMENT }}*\"}" \
             https://slack.com/api/chat.postMessage
+
+  deploy:
+    needs: build
+    uses: ./.github/workflows/deploy-ecs-ai-ml.yml
+    with:
+      image: ${{ needs.build.outputs.image }}
+      environment: ${{ needs.build.outputs.environment }}
+      service: ${{ needs.build.outputs.service }}
+    secrets: inherit
