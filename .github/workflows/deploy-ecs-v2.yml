@@ -21,18 +21,18 @@ jobs:
       - name: Get Pipeline 1 outputs
         id: get-outputs
         env:
-          GH_TOKEN: ${{ github.token }}   # ✅ Required for gh CLI auth
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "Getting outputs from the completed workflow run..."
           RUN_ID=${{ github.event.workflow_run.id }}
 
-          # 🟢 FIX: Correct endpoint to fetch job details
-          JOBS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs | jq -r '.jobs[] | select(.name=="build")')
+          # Fetch job details from the previous workflow
+          JOBS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID | jq -r '.jobs[] | select(.name=="build")')
 
-          # Extract outputs from the "export" step
-          IMAGE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="export") | .outputs.image')
-          SERVICE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="export") | .outputs.service')
-          ENVIRONMENT=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="export") | .outputs.environment')
+          # Extract outputs from the "Export outputs for downstream workflows" step
+          IMAGE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.image')
+          SERVICE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.service')
+          ENVIRONMENT=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.environment')
 
           # Debug
           echo "IMAGE=$IMAGE"
@@ -42,11 +42,10 @@ jobs:
           # Fail if missing
           if [ -z "$IMAGE" ] || [ -z "$SERVICE" ] || [ -z "$ENVIRONMENT" ]; then
             echo "❌ Missing required outputs from build pipeline!"
-            echo "$JOBS" | jq '.'  # 🟢 print raw job JSON for debugging
             exit 1
           fi
 
-          # Export to GitHub env
+          # Export to GitHub environment
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
@@ -60,13 +59,12 @@ jobs:
 
       - name: Determine ECS Cluster
         run: |
-          echo "ENVIRONMENT=$ENVIRONMENT"
           if [ "$ENVIRONMENT" = "prd" ]; then
             echo "ECS_CLUSTER=${{ secrets.PRD_ECS_CLUSTER }}" >> $GITHUB_ENV
           else
             echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
           fi
-          echo "✅ ECS_CLUSTER set"
+          echo "ECS_CLUSTER=$ECS_CLUSTER"
 
       - name: Get container name dynamically
         id: get-container
@@ -80,22 +78,27 @@ jobs:
           fi
 
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          echo "✅ Using container: $CONTAINER_NAME"
+          echo "Using container: $CONTAINER_NAME"
 
       - name: Render ECS Task Definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
+        env:
+          IMAGE: ${{ env.IMAGE }}
         with:
           task-definition: task-definition.json
-          container-name: ${{ env.CONTAINER_NAME }}   # 🟢 fixed reference
-          image: ${{ env.IMAGE }}
+          container-name: $CONTAINER_NAME
+          image: $IMAGE
 
       - name: Deploy ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        env:
+          ECS_CLUSTER: ${{ env.ECS_CLUSTER }}
+          SERVICE: ${{ env.SERVICE }}
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
+          service: $SERVICE
+          cluster: $ECS_CLUSTER
           wait-for-service-stability: true
 
       - name: Notify Slack
