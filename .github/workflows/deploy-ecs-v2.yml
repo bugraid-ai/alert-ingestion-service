@@ -1,0 +1,129 @@
+name: deploy-ecs-ai-ml
+
+on:
+  workflow_run:
+    workflows: ["build-and-push-ai-ml"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI and jq
+        run: sudo apt update && sudo apt install -y gh jq
+
+      # ✅ Download build outputs artifact from Pipeline 1
+      - name: Get Build Outputs
+        id: get-outputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "📦 Downloading outputs from build pipeline..."
+          gh run download ${{ github.event.workflow_run.id }} --name build-outputs --dir ./artifacts
+
+          echo "✅ Artifact downloaded:"
+          cat ./artifacts/outputs.json || { echo "❌ outputs.json missing"; exit 1; }
+
+          IMAGE=$(jq -r '.image' ./artifacts/outputs.json)
+          SERVICE=$(jq -r '.service' ./artifacts/outputs.json)
+          ENVIRONMENT=$(jq -r '.environment' ./artifacts/outputs.json)
+
+          echo "🔹 IMAGE=$IMAGE"
+          echo "🔹 SERVICE=$SERVICE"
+          echo "🔹 ENVIRONMENT=$ENVIRONMENT"
+
+          [ -z "$IMAGE" ] && { echo "❌ IMAGE missing"; exit 1; }
+          [ -z "$SERVICE" ] && { echo "❌ SERVICE missing"; exit 1; }
+          [ -z "$ENVIRONMENT" ] && { echo "❌ ENVIRONMENT missing"; exit 1; }
+
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          echo "SERVICE=$SERVICE" >> $GITHUB_ENV
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Determine ECS Cluster
+        run: |
+          if [ "$ENVIRONMENT" = "prd" ]; then
+            echo "ECS_CLUSTER=${{ secrets.PRD_ECS_CLUSTER }}" >> $GITHUB_ENV
+          else
+            echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
+          fi
+          echo "Using ECS cluster: $ECS_CLUSTER"
+
+      # ✅ Locate correct task definition path (root or service folder)
+      - name: Locate task definition
+        run: |
+          SERVICE_NAME="${{ env.SERVICE }}"
+          if [ -f "./${SERVICE_NAME}/task-definition.json" ]; then
+            echo "TASK_DEF_PATH=./${SERVICE_NAME}/task-definition.json" >> $GITHUB_ENV
+          else
+            echo "TASK_DEF_PATH=task-definition.json" >> $GITHUB_ENV
+          fi
+          echo "Using task definition path: $TASK_DEF_PATH"
+
+      # ✅ Get container name dynamically (fixed jq logic)
+      - name: Get container name dynamically
+        id: get-container
+        run: |
+          SERVICE_NAME="${{ env.SERVICE }}"
+          CONTAINER_NAME=$(jq -r --arg svc "$SERVICE_NAME" '.containerDefinitions[] | select(.name | startswith($svc)) | .name' $TASK_DEF_PATH)
+
+          if [ -z "$CONTAINER_NAME" ]; then
+            echo "❌ No matching container found for service: $SERVICE_NAME"
+            echo "Contents of task definition for debugging:"
+            jq '.' $TASK_DEF_PATH
+            exit 1
+          fi
+
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          echo "✅ Found container: $CONTAINER_NAME"
+
+      # ✅ Render ECS task definition with correct image
+      - name: Render ECS Task Definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.TASK_DEF_PATH }}
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.IMAGE }}
+
+      # ✅ Deploy new revision to ECS
+      - name: Deploy ECS Service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      # ✅ Notify Slack (success/failure)
+      - name: Notify Slack
+        if: always()
+        run: |
+          STATUS_TEXT="FAILED"; STATUS_EMOJI=":x:"
+          if [ "${{ job.status }}" == "success" ]; then
+            STATUS_TEXT="SUCCESS"; STATUS_EMOJI=":white_check_mark:"
+          fi
+
+          MESSAGE="$STATUS_EMOJI *Deploy $STATUS_TEXT* for *${{ env.SERVICE }}*  
+          Environment: ${{ env.ENVIRONMENT }}  
+          Image: ${{ env.IMAGE }}  
+          Cluster: ${{ env.ECS_CLUSTER }}"
+
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Content-type: application/json" \
+            --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
+            https://slack.com/api/chat.postMessage

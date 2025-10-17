@@ -1,0 +1,126 @@
+name: build-and-push-ai-ml
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, prd]
+      service:
+        description: "ECS Service to build for"
+        required: true
+        type: choice
+        options: [alert-ingestion, anomaly-detection-dev, context-fetcher]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.export.outputs.image }}
+      environment: ${{ steps.export.outputs.environment }}
+      service: ${{ steps.export.outputs.service }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set environment variables
+        run: |
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "SERVICE=${{ github.event.inputs.service }}" >> $GITHUB_ENV
+          echo "VERSION=v1.0.0.${{ github.run_number }}" >> $GITHUB_ENV
+          echo "Selected Environment: ${{ github.event.inputs.environment }}"
+          echo "Selected Service: ${{ github.event.inputs.service }}"
+          echo "Selected Version: ${{ env.VERSION }}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Run Trivy FS scan
+        id: trivy-fs
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          output: trivy-fs-report.txt
+          exit-code: 0
+          vuln-type: os,library
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Docker image
+        run: |
+          if [ "${{ env.ENVIRONMENT }}" = "prd" ]; then
+            ECR_REPO=${{ secrets.PRD_ECR_REPO }}
+          else
+            ECR_REPO=${{ secrets.DEV_ECR_REPO }}
+          fi
+
+          IMAGE="$ECR_REPO:${{ env.SERVICE }}-${{ env.VERSION }}"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+          echo "🛠 Building Docker image: $IMAGE"
+          docker build --no-cache -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "✅ Pushed $IMAGE successfully"
+
+      - name: Run Trivy Image scan
+        id: trivy-image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: table
+          output: trivy-image-report.txt
+          exit-code: 0
+          vuln-type: os,library
+
+      - name: Export outputs for downstream workflows
+        id: export
+        run: |
+          echo "image=${{ env.IMAGE }}" >> $GITHUB_OUTPUT
+          echo "environment=${{ env.ENVIRONMENT }}" >> $GITHUB_OUTPUT
+          echo "service=${{ env.SERVICE }}" >> $GITHUB_OUTPUT
+
+      # ✅ Added section — saves outputs to artifact for pipeline 2
+      - name: Save outputs for deploy
+        run: |
+          echo "{\"image\":\"${{ env.IMAGE }}\",\"service\":\"${{ env.SERVICE }}\",\"environment\":\"${{ env.ENVIRONMENT }}\"}" > outputs.json
+
+      - name: Upload outputs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs
+          path: outputs.json
+      # ✅ End of addition
+
+      - name: Notify Slack
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            STATUS_EMOJI=":white_check_mark:"
+            STATUS_TEXT="SUCCESS"
+          else
+            STATUS_EMOJI=":x:"
+            STATUS_TEXT="FAILED"
+          fi
+
+          MESSAGE="$STATUS_EMOJI *Build $STATUS_TEXT* for *${{ env.SERVICE }}*  
+          Environment: ${{ env.ENVIRONMENT }}  
+          Version: ${{ env.VERSION }}  
+          Image: ${{ env.IMAGE }}  
+          Trigger: ${{ github.event_name }}  
+          Branch: ${{ github.ref_name }}"
+
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Content-type: application/json" \
+            --data "{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"text\":\"$MESSAGE\"}" \
+            https://slack.com/api/chat.postMessage
