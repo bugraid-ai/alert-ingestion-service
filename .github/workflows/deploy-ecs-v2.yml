@@ -17,7 +17,7 @@ jobs:
       - name: Install GitHub CLI and jq
         run: sudo apt update && sudo apt install -y gh jq
 
-      # ✅ Fixed summary retrieval section
+      # ✅ Fixed summary retrieval using .body field
       - name: Get Pipeline 1 outputs from summary
         id: get-outputs
         env:
@@ -26,8 +26,8 @@ jobs:
           RUN_ID=${{ github.event.workflow_run.id }}
           echo "Fetching summary from run: $RUN_ID"
 
-          # Use supported CLI endpoint to fetch the run summary
-          gh run view $RUN_ID --repo ${{ github.repository }} --json summary -q '.summary' > summary.txt
+          # Fetch the summary markdown body (contains $GITHUB_STEP_SUMMARY text)
+          gh api repos/${{ github.repository }}/actions/runs/$RUN_ID --jq '.body' > summary.txt
 
           echo "✅ Summary content:"
           cat summary.txt
