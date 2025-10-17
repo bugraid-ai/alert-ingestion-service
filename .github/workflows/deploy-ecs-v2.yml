@@ -26,13 +26,17 @@ jobs:
           echo "Getting outputs from the completed workflow run..."
           RUN_ID=${{ github.event.workflow_run.id }}
 
-          # Fetch job details from the previous workflow
-          JOBS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID | jq -r '.jobs[] | select(.name=="build")')
+          # ✅ Correct endpoint to fetch jobs and steps
+          JOBS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs)
 
-          # Extract outputs from the "Export outputs for downstream workflows" step
-          IMAGE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.image')
-          SERVICE=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.service')
-          ENVIRONMENT=$(echo "$JOBS" | jq -r '.steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.environment')
+          # OPTIONAL DEBUG: print jobs to verify outputs
+          echo "$JOBS" > job_debug.json
+          cat job_debug.json
+
+          # Extract outputs from the correct step
+          IMAGE=$(echo "$JOBS" | jq -r '.jobs[].steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.image')
+          SERVICE=$(echo "$JOBS" | jq -r '.jobs[].steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.service')
+          ENVIRONMENT=$(echo "$JOBS" | jq -r '.jobs[].steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.environment')
 
           # Debug
           echo "IMAGE=$IMAGE"
@@ -45,7 +49,7 @@ jobs:
             exit 1
           fi
 
-          # Export to GitHub environment
+          # Export for downstream steps
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
