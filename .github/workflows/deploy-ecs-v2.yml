@@ -18,6 +18,7 @@ jobs:
       - name: Install GitHub CLI and jq
         run: sudo apt update && sudo apt install -y gh jq
 
+      # ✅ Download build outputs artifact from Pipeline 1
       - name: Get Build Outputs
         id: get-outputs
         env:
@@ -60,15 +61,29 @@ jobs:
             echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
           fi
 
+      # ✅ Locate correct task-definition.json (root or per-service)
+      - name: Locate task definition
+        run: |
+          SERVICE_NAME="${{ env.SERVICE }}"
+          if [ -f "./${SERVICE_NAME}/task-definition.json" ]; then
+            echo "TASK_DEF_PATH=./${SERVICE_NAME}/task-definition.json" >> $GITHUB_ENV
+          else
+            echo "TASK_DEF_PATH=task-definition.json" >> $GITHUB_ENV
+          fi
+          echo "Using task definition: $TASK_DEF_PATH"
+
+      # ✅ Corrected jq syntax for container lookup
       - name: Get container name dynamically
         id: get-container
         run: |
           SERVICE_NAME="${{ env.SERVICE }}"
-          CONTAINER_NAME=$(jq -r --arg svc "$SERVICE_NAME" '.containerDefinitions[] | select($svc | startswith(.name)) | .name' task-definition.json)
+          CONTAINER_NAME=$(jq -r --arg svc "$SERVICE_NAME" '.containerDefinitions[] | select(.name | startswith($svc)) | .name' $TASK_DEF_PATH)
+
           if [ -z "$CONTAINER_NAME" ]; then
             echo "❌ No matching container found for service: $SERVICE_NAME"
             exit 1
           fi
+
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
           echo "Using container: $CONTAINER_NAME"
 
@@ -78,7 +93,7 @@ jobs:
         env:
           IMAGE: ${{ env.IMAGE }}
         with:
-          task-definition: task-definition.json
+          task-definition: ${{ env.TASK_DEF_PATH }}
           container-name: $CONTAINER_NAME
           image: $IMAGE
 
