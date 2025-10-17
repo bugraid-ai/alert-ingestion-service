@@ -3,7 +3,8 @@ name: deploy-ecs-ai-ml
 on:
   workflow_run:
     workflows: ["build-and-push-ai-ml"]
-    types: [completed]
+    types:
+      - completed
 
 jobs:
   deploy:
@@ -17,34 +18,36 @@ jobs:
       - name: Install GitHub CLI and jq
         run: sudo apt update && sudo apt install -y gh jq
 
-      # ✅ Fixed summary retrieval using .body field
-      - name: Get Pipeline 1 outputs from summary
+      # ✅ FIXED: Properly fetch outputs via artifact from Pipeline 1
+      - name: Get Pipeline 1 outputs
         id: get-outputs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RUN_ID=${{ github.event.workflow_run.id }}
-          echo "Fetching summary from run: $RUN_ID"
+          echo "📦 Downloading outputs artifact from run ID: ${{ github.event.workflow_run.id }}"
 
-          # Fetch the summary markdown body (contains $GITHUB_STEP_SUMMARY text)
-          gh api repos/${{ github.repository }}/actions/runs/$RUN_ID --jq '.body' > summary.txt
+          # Download the 'build-outputs' artifact from the completed build pipeline
+          gh run download ${{ github.event.workflow_run.id }} --name build-outputs --dir ./artifacts
 
-          echo "✅ Summary content:"
-          cat summary.txt
+          echo "✅ Artifact downloaded. Contents:"
+          cat ./artifacts/outputs.json || { echo "❌ outputs.json not found"; exit 1; }
 
-          IMAGE=$(grep -m1 '^image=' summary.txt | cut -d'=' -f2)
-          SERVICE=$(grep -m1 '^service=' summary.txt | cut -d'=' -f2)
-          ENVIRONMENT=$(grep -m1 '^environment=' summary.txt | cut -d'=' -f2)
+          # Extract values
+          IMAGE=$(jq -r '.image' ./artifacts/outputs.json)
+          SERVICE=$(jq -r '.service' ./artifacts/outputs.json)
+          ENVIRONMENT=$(jq -r '.environment' ./artifacts/outputs.json)
 
-          echo "IMAGE=$IMAGE"
-          echo "SERVICE=$SERVICE"
-          echo "ENVIRONMENT=$ENVIRONMENT"
+          echo "🔹 IMAGE=$IMAGE"
+          echo "🔹 SERVICE=$SERVICE"
+          echo "🔹 ENVIRONMENT=$ENVIRONMENT"
 
+          # Validate
           if [ -z "$IMAGE" ] || [ -z "$SERVICE" ] || [ -z "$ENVIRONMENT" ]; then
-            echo "❌ Missing required outputs!"
+            echo "❌ Missing required outputs from build pipeline!"
             exit 1
           fi
 
+          # Export to environment for next steps
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV

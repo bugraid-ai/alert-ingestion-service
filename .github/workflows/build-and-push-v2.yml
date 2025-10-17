@@ -89,15 +89,17 @@ jobs:
           echo "environment=${{ env.ENVIRONMENT }}" >> $GITHUB_OUTPUT
           echo "service=${{ env.SERVICE }}" >> $GITHUB_OUTPUT
 
-      # ✅ NEW — Write key=value lines to the run summary
-      - name: Write outputs to GITHUB_STEP_SUMMARY
+      # ✅ Added section — saves outputs to artifact for pipeline 2
+      - name: Save outputs for deploy
         run: |
-          {
-            echo "image=${{ env.IMAGE }}"
-            echo "service=${{ env.SERVICE }}"
-            echo "environment=${{ env.ENVIRONMENT }}"
-          } >> $GITHUB_STEP_SUMMARY
-      # ✅ END
+          echo "{\"image\":\"${{ env.IMAGE }}\",\"service\":\"${{ env.SERVICE }}\",\"environment\":\"${{ env.ENVIRONMENT }}\"}" > outputs.json
+
+      - name: Upload outputs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs
+          path: outputs.json
+      # ✅ End of addition
 
       - name: Notify Slack
         if: always()
