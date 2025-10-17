@@ -89,6 +89,16 @@ jobs:
           echo "environment=${{ env.ENVIRONMENT }}" >> $GITHUB_OUTPUT
           echo "service=${{ env.SERVICE }}" >> $GITHUB_OUTPUT
 
+      # ✅ NEW — Write key=value lines to the run summary
+      - name: Write outputs to GITHUB_STEP_SUMMARY
+        run: |
+          {
+            echo "image=${{ env.IMAGE }}"
+            echo "service=${{ env.SERVICE }}"
+            echo "environment=${{ env.ENVIRONMENT }}"
+          } >> $GITHUB_STEP_SUMMARY
+      # ✅ END
+
       - name: Notify Slack
         if: always()
         run: |

@@ -3,8 +3,7 @@ name: deploy-ecs-ai-ml
 on:
   workflow_run:
     workflows: ["build-and-push-ai-ml"]
-    types:
-      - completed
+    types: [completed]
 
 jobs:
   deploy:
@@ -18,41 +17,36 @@ jobs:
       - name: Install GitHub CLI and jq
         run: sudo apt update && sudo apt install -y gh jq
 
-      - name: Get Pipeline 1 outputs
+      # ✅ Read key=value lines from previous run's summary
+      - name: Get Pipeline 1 outputs from summary
         id: get-outputs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Getting outputs from the completed workflow run..."
           RUN_ID=${{ github.event.workflow_run.id }}
+          echo "Fetching summary from run: $RUN_ID"
 
-          # ✅ Correct endpoint to fetch jobs and steps
-          JOBS=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs)
+          gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/attempts/1/summary > summary.txt
+          echo "✅ Summary content:"
+          cat summary.txt
 
-          # OPTIONAL DEBUG: print jobs to verify outputs
-          echo "$JOBS" > job_debug.json
-          cat job_debug.json
+          IMAGE=$(grep -m1 '^image=' summary.txt | cut -d'=' -f2)
+          SERVICE=$(grep -m1 '^service=' summary.txt | cut -d'=' -f2)
+          ENVIRONMENT=$(grep -m1 '^environment=' summary.txt | cut -d'=' -f2)
 
-          # Extract outputs from the correct step
-          IMAGE=$(echo "$JOBS" | jq -r '.jobs[].steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.image')
-          SERVICE=$(echo "$JOBS" | jq -r '.jobs[].steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.service')
-          ENVIRONMENT=$(echo "$JOBS" | jq -r '.jobs[].steps[] | select(.name=="Export outputs for downstream workflows") | .outputs.environment')
-
-          # Debug
           echo "IMAGE=$IMAGE"
           echo "SERVICE=$SERVICE"
           echo "ENVIRONMENT=$ENVIRONMENT"
 
-          # Fail if missing
           if [ -z "$IMAGE" ] || [ -z "$SERVICE" ] || [ -z "$ENVIRONMENT" ]; then
-            echo "❌ Missing required outputs from build pipeline!"
+            echo "❌ Missing required outputs!"
             exit 1
           fi
 
-          # Export for downstream steps
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+      # ✅ END FIX
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
