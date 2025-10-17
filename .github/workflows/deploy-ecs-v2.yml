@@ -60,8 +60,9 @@ jobs:
           else
             echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
           fi
+          echo "Using ECS cluster: $ECS_CLUSTER"
 
-      # ✅ Locate correct task-definition.json (root or per-service)
+      # ✅ Locate correct task definition path (root or service folder)
       - name: Locate task definition
         run: |
           SERVICE_NAME="${{ env.SERVICE }}"
@@ -70,9 +71,9 @@ jobs:
           else
             echo "TASK_DEF_PATH=task-definition.json" >> $GITHUB_ENV
           fi
-          echo "Using task definition: $TASK_DEF_PATH"
+          echo "Using task definition path: $TASK_DEF_PATH"
 
-      # ✅ Corrected jq syntax for container lookup
+      # ✅ Get container name dynamically (fixed jq logic)
       - name: Get container name dynamically
         id: get-container
         run: |
@@ -81,22 +82,24 @@ jobs:
 
           if [ -z "$CONTAINER_NAME" ]; then
             echo "❌ No matching container found for service: $SERVICE_NAME"
+            echo "Contents of task definition for debugging:"
+            jq '.' $TASK_DEF_PATH
             exit 1
           fi
 
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          echo "Using container: $CONTAINER_NAME"
+          echo "✅ Found container: $CONTAINER_NAME"
 
+      # ✅ Render ECS task definition with correct image
       - name: Render ECS Task Definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
-        env:
-          IMAGE: ${{ env.IMAGE }}
         with:
           task-definition: ${{ env.TASK_DEF_PATH }}
-          container-name: $CONTAINER_NAME
-          image: $IMAGE
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.IMAGE }}
 
+      # ✅ Deploy new revision to ECS
       - name: Deploy ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
@@ -105,6 +108,7 @@ jobs:
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
 
+      # ✅ Notify Slack (success/failure)
       - name: Notify Slack
         if: always()
         run: |
