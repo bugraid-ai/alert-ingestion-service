@@ -18,21 +18,17 @@ jobs:
       - name: Install GitHub CLI and jq
         run: sudo apt update && sudo apt install -y gh jq
 
-      # ✅ FIXED: Properly fetch outputs via artifact from Pipeline 1
-      - name: Get Pipeline 1 outputs
+      - name: Get Build Outputs
         id: get-outputs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "📦 Downloading outputs artifact from run ID: ${{ github.event.workflow_run.id }}"
-
-          # Download the 'build-outputs' artifact from the completed build pipeline
+          echo "📦 Downloading outputs from build pipeline..."
           gh run download ${{ github.event.workflow_run.id }} --name build-outputs --dir ./artifacts
 
-          echo "✅ Artifact downloaded. Contents:"
-          cat ./artifacts/outputs.json || { echo "❌ outputs.json not found"; exit 1; }
+          echo "✅ Artifact downloaded:"
+          cat ./artifacts/outputs.json || { echo "❌ outputs.json missing"; exit 1; }
 
-          # Extract values
           IMAGE=$(jq -r '.image' ./artifacts/outputs.json)
           SERVICE=$(jq -r '.service' ./artifacts/outputs.json)
           ENVIRONMENT=$(jq -r '.environment' ./artifacts/outputs.json)
@@ -41,17 +37,13 @@ jobs:
           echo "🔹 SERVICE=$SERVICE"
           echo "🔹 ENVIRONMENT=$ENVIRONMENT"
 
-          # Validate
-          if [ -z "$IMAGE" ] || [ -z "$SERVICE" ] || [ -z "$ENVIRONMENT" ]; then
-            echo "❌ Missing required outputs from build pipeline!"
-            exit 1
-          fi
+          [ -z "$IMAGE" ] && { echo "❌ IMAGE missing"; exit 1; }
+          [ -z "$SERVICE" ] && { echo "❌ SERVICE missing"; exit 1; }
+          [ -z "$ENVIRONMENT" ] && { echo "❌ ENVIRONMENT missing"; exit 1; }
 
-          # Export to environment for next steps
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
-      # ✅ End of fix
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -67,19 +59,16 @@ jobs:
           else
             echo "ECS_CLUSTER=${{ secrets.DEV_ECS_CLUSTER }}" >> $GITHUB_ENV
           fi
-          echo "ECS_CLUSTER=$ECS_CLUSTER"
 
       - name: Get container name dynamically
         id: get-container
         run: |
           SERVICE_NAME="${{ env.SERVICE }}"
           CONTAINER_NAME=$(jq -r --arg svc "$SERVICE_NAME" '.containerDefinitions[] | select($svc | startswith(.name)) | .name' task-definition.json)
-
           if [ -z "$CONTAINER_NAME" ]; then
             echo "❌ No matching container found for service: $SERVICE_NAME"
             exit 1
           fi
-
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
           echo "Using container: $CONTAINER_NAME"
 
@@ -95,13 +84,10 @@ jobs:
 
       - name: Deploy ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        env:
-          ECS_CLUSTER: ${{ env.ECS_CLUSTER }}
-          SERVICE: ${{ env.SERVICE }}
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: $SERVICE
-          cluster: $ECS_CLUSTER
+          service: ${{ env.SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
 
       - name: Notify Slack
