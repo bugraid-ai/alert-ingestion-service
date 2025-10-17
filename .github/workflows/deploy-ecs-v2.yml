@@ -17,7 +17,7 @@ jobs:
       - name: Install GitHub CLI and jq
         run: sudo apt update && sudo apt install -y gh jq
 
-      # ✅ Read key=value lines from previous run's summary
+      # ✅ Fixed summary retrieval section
       - name: Get Pipeline 1 outputs from summary
         id: get-outputs
         env:
@@ -26,7 +26,9 @@ jobs:
           RUN_ID=${{ github.event.workflow_run.id }}
           echo "Fetching summary from run: $RUN_ID"
 
-          gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/attempts/1/summary > summary.txt
+          # Use supported CLI endpoint to fetch the run summary
+          gh run view $RUN_ID --repo ${{ github.repository }} --json summary -q '.summary' > summary.txt
+
           echo "✅ Summary content:"
           cat summary.txt
 
@@ -46,7 +48,7 @@ jobs:
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "SERVICE=$SERVICE" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
-      # ✅ END FIX
+      # ✅ End of fix
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
